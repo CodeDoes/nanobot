@@ -127,6 +127,13 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore:.*pkg_resources.*:DeprecationWarning",
+    "ignore:.*lark_oapi.*:DeprecationWarning",
+    "ignore:.*datetime.datetime.utcfromtimestamp.*:DeprecationWarning",
+    "ignore:.*websockets.*:DeprecationWarning",
+    "ignore:.*There is no current event loop.*:DeprecationWarning",
+]
 
 [tool.coverage.run]
 source = ["nanobot"]
