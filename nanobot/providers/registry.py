@@ -338,6 +338,35 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.groq.com/openai/v1",
     ),
+    # Kilocode: AI gateway, OpenAI-compatible.
+    ProviderSpec(
+        name="kilocode",
+        keywords=("kilocode", "kilo"),
+        env_key="KILOCODE_API_KEY",
+        display_name="Kilocode",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="kilo",
+        default_api_base="https://api.kilo.ai/api/gateway/",
+    ),
+    # Featherless: Large-scale model hosting.
+    ProviderSpec(
+        name="featherless",
+        keywords=("featherless",),
+        env_key="FEATHERLESS_API_KEY",
+        display_name="Featherless",
+        backend="openai_compat",
+        default_api_base="https://api.featherless.ai/v1",
+    ),
+    # Cerebras: High-speed wafer-scale inference.
+    ProviderSpec(
+        name="cerebras",
+        keywords=("cerebras",),
+        env_key="CEREBRAS_API_KEY",
+        display_name="Cerebras",
+        backend="openai_compat",
+        default_api_base="https://api.cerebras.ai/v1",
+    ),
 )
 
 
