@@ -1,6 +1,7 @@
 """Subagent manager for background task execution."""
 
 import asyncio
+import threading
 import json
 import uuid
 from pathlib import Path
@@ -18,6 +19,8 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig
+from nanobot.agent.resource_manager import WeightedSemaphore
+from nanobot.agent.resource_manager import WeightedSemaphore as FEATHER_LIMIT
 from nanobot.providers.base import LLMProvider
 
 
@@ -38,6 +41,14 @@ class _SubagentHook(AgentHook):
 
 class SubagentManager:
     """Manages background subagent execution."""
+    # Resource manager is shared across all SubagentManager instances (singleton for process)
+    _resource_manager = None
+
+    @classmethod
+    def get_resource_manager(cls, max_points=4):
+        if cls._resource_manager is None:
+            cls._resource_manager = WeightedSemaphore(max_points)
+        return cls._resource_manager
 
     def __init__(
         self,
@@ -64,6 +75,7 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
+
     async def spawn(
         self,
         task: str,
@@ -72,29 +84,74 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
     ) -> str:
-        """Spawn a subagent to execute a task in the background."""
-        task_id = str(uuid.uuid4())[:8]
-        display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id}
+        """Spawn a subagent to execute a task in the background, using point-based concurrency and interruptible wait."""
+        import re
+        import time
+        from nanobot.config import config
+        from nanobot.agent.resource_manager import FEATHER_LIMIT
 
-        bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+        # Calculate points for this subagent from concurrency_map (default: 72B=4, 32B=2, others=1)
+        model_id = self.model or "4B"
+        match = re.search(r"(\d+B)", model_id)
+        model_size = match.group(1) if match else "4B"
+        concurrency_map = getattr(getattr(config, "agents", None), "concurrency_map", None) or {"72B": 4, "32B": 2}
+        points = concurrency_map.get(model_size, 1)
+
+        logger.info(f"Requesting {points} points for subagent (model: {model_id})")
+        FEATHER_LIMIT.acquire(points)
+        try:
+            task_id = str(uuid.uuid4())[:8]
+            display_label = label or task[:30] + ("..." if len(task) > 30 else "")
+            origin = {"channel": origin_channel, "chat_id": origin_chat_id}
+
+            # Start the subagent in a worker thread
+            loop = asyncio.get_event_loop()
+            worker = threading.Thread(target=lambda: loop.create_task(self._run_subagent(task_id, task, display_label, origin)), daemon=True)
+            worker.start()
+            self._running_tasks[task_id] = worker
+            if session_key:
+                self._session_tasks.setdefault(session_key, set()).add(task_id)
+
+            try:
+                while worker.is_alive():
+                    # Interrupt check: see if parent_agent.mailbox has new user messages every 0.1s
+                    parent = getattr(self, 'parent_agent', None)
+                    if parent and hasattr(parent, 'mailbox'):
+                        user_msgs = [m for m in parent.mailbox if m.get('role') == 'user']
+                        if user_msgs:
+                            # Provide status update and remove the message from mailbox
+                            msg = user_msgs.pop(0)
+                            await self._handle_user_interrupt(display_label, origin, msg)
+                    time.sleep(0.1)
+            finally:
+                self._running_tasks.pop(task_id, None)
+                if session_key and (ids := self._session_tasks.get(session_key)):
+                    ids.discard(task_id)
+                    if not ids:
+                        del self._session_tasks[session_key]
+        finally:
+            FEATHER_LIMIT.release(points)
+
+        logger.info("Spawned subagent [{}]: {} (points: {})", task_id, display_label, points)
+        return f"Subagent [{display_label}] started (id: {task_id}, points: {points}). I'll notify you when it completes."
+
+    async def _check_for_user_message(self, channel, chat_id):
+        # Placeholder: poll the message bus for new inbound user messages for this session
+        # Return the message if found, else None
+        # You may want to implement a more efficient event-driven approach
+        # For now, always return None (no interrupt)
+        return None
+
+    async def _handle_user_interrupt(self, display_label, origin, user_msg):
+        # Send a status update to the user
+        status = f"Subagent [{display_label}] is still working. I'll notify you when it completes."
+        msg = InboundMessage(
+            channel=origin["channel"],
+            sender_id="subagent-status",
+            chat_id=f"{origin['channel']}:{origin['chat_id']}",
+            content=status,
         )
-        self._running_tasks[task_id] = bg_task
-        if session_key:
-            self._session_tasks.setdefault(session_key, set()).add(task_id)
-
-        def _cleanup(_: asyncio.Task) -> None:
-            self._running_tasks.pop(task_id, None)
-            if session_key and (ids := self._session_tasks.get(session_key)):
-                ids.discard(task_id)
-                if not ids:
-                    del self._session_tasks[session_key]
-
-        bg_task.add_done_callback(_cleanup)
-
-        logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+        await self.bus.publish_inbound(msg)
 
     async def _run_subagent(
         self,

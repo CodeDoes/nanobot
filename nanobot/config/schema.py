@@ -48,6 +48,7 @@ class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    concurrency_map: dict[str, int] = Field(default_factory=dict)
 
 
 class ProviderConfig(Base):
