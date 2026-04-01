@@ -28,13 +28,17 @@ def test_manager_blocks_worker():
     t1 = threading.Thread(target=manager_task)
     t2 = threading.Thread(target=worker_task)
     t1.start()
-    worker_started.wait()
-    time.sleep(0.05)
+    manager_acquired.wait(timeout=1)
+    assert manager_acquired.is_set()
     t2.start()
-    manager_acquired.wait()
+    worker_started.wait(timeout=1)
+    assert worker_started.is_set()
+
     # Worker should not acquire until manager releases
     assert not worker_acquired.is_set()
-    t1.join()
+
+    t1.join(timeout=1)
+    assert not t1.is_alive()
     t2.join(timeout=1)
     assert worker_acquired.is_set()
 
@@ -55,16 +59,21 @@ def test_interruptible_wait():
 
     t = threading.Thread(target=blocking_task)
     t.start()
-    acquired.wait()
+    assert acquired.wait(timeout=1), "blocking_task did not acquire in time"
+
     # Try to acquire in another thread (should block)
     def waiter():
         FEATHER_LIMIT.acquire(2)
         FEATHER_LIMIT.release(2)
     w = threading.Thread(target=waiter)
     w.start()
+
     time.sleep(0.1)
     assert not released.is_set()
+
     interrupt_event.set()
     t.join(timeout=1)
+    assert not t.is_alive(), "blocking_task did not terminate in time"
     w.join(timeout=1)
+    assert not w.is_alive(), "waiter did not terminate in time"
     assert released.is_set()
