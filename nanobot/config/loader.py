@@ -74,4 +74,13 @@ def _migrate_config(data: dict) -> dict:
     exec_cfg = tools.get("exec", {})
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
+
+    # Move legacy root-level concurrency_map → agents.concurrency_map
+    if "concurrency_map" in data:
+        agents = data.setdefault("agents", {})
+        if "concurrencyMap" not in agents and "concurrency_map" not in agents:
+            agents["concurrencyMap"] = data.pop("concurrency_map")
+        else:
+            data.pop("concurrency_map")
+
     return data

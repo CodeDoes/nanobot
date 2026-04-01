@@ -126,3 +126,29 @@ def test_onboard_refresh_backfills_missing_channel_fields(tmp_path, monkeypatch)
     assert result.exit_code == 0
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved["channels"]["qq"]["msgFormat"] == "plain"
+
+
+def test_load_config_migrates_top_level_concurrency_map(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "concurrency_map": {
+                    "72B": 4,
+                    "32B": 2,
+                    "24B": 2,
+                    "4B": 1,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(config_path)
+
+    assert config.agents.concurrency_map == {
+        "72B": 4,
+        "32B": 2,
+        "24B": 2,
+        "4B": 1,
+    }

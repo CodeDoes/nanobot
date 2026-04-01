@@ -127,6 +127,7 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["featherless: mark tests that require Featherless provider behavior"]
 filterwarnings = [
     "ignore:.*pkg_resources.*:DeprecationWarning",
     "ignore:.*lark_oapi.*:DeprecationWarning",

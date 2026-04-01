@@ -76,6 +76,20 @@ class SubagentManager:
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
 
+    @staticmethod
+    def _calculate_concurrency_points(model_id: str, concurrency_map: dict[str, int] | None = None) -> int:
+        import re
+
+        model_size = "4B"
+        match = re.search(r"(\d+B)", model_id)
+        if match:
+            model_size = match.group(1)
+
+        if concurrency_map is None:
+            concurrency_map = {"72B": 4, "32B": 2}
+
+        return concurrency_map.get(model_size, 1)
+
     async def spawn(
         self,
         task: str,
@@ -83,22 +97,37 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
+        acquire_timeout: float = 10.0,
     ) -> str:
         """Spawn a subagent to execute a task in the background, using point-based concurrency and interruptible wait."""
-        import re
         import time
-        from nanobot.config import config
-        from nanobot.agent.resource_manager import FEATHER_LIMIT
+        from nanobot.config.loader import load_config
 
         # Calculate points for this subagent from concurrency_map (default: 72B=4, 32B=2, others=1)
         model_id = self.model or "4B"
-        match = re.search(r"(\d+B)", model_id)
-        model_size = match.group(1) if match else "4B"
-        concurrency_map = getattr(getattr(config, "agents", None), "concurrency_map", None) or {"72B": 4, "32B": 2}
-        points = concurrency_map.get(model_size, 1)
+        config = load_config()
+        concurrency_map = getattr(getattr(config, "agents", None), "concurrency_map", None)
+        points = self._calculate_concurrency_points(model_id, concurrency_map)
+
+        if points > FEATHER_LIMIT.max_points:
+            logger.warning(
+                "Requested points %s for model %s exceeds max %s, using max instead",
+                points,
+                model_id,
+                FEATHER_LIMIT.max_points,
+            )
+            points = FEATHER_LIMIT.max_points
 
         logger.info(f"Requesting {points} points for subagent (model: {model_id})")
-        FEATHER_LIMIT.acquire(points)
+        acquired = FEATHER_LIMIT.acquire(points, timeout=acquire_timeout)
+        if not acquired:
+            msg = (
+                f"Subagent request timed out waiting for {points} points "
+                f"(model: {model_id}, timeout: {acquire_timeout}s)."
+            )
+            logger.warning(msg)
+            return msg
+
         try:
             task_id = str(uuid.uuid4())[:8]
             display_label = label or task[:30] + ("..." if len(task) > 30 else "")

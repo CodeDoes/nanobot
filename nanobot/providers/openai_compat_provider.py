@@ -234,6 +234,9 @@ class OpenAICompatProvider(LLMProvider):
         model_name = model or self.default_model
         spec = self._spec
 
+        if model_name.startswith("featherless/"):
+            model_name = model_name[len("featherless/"):]
+
         if spec and spec.supports_prompt_caching:
             messages, tools = self._apply_cache_control(messages, tools)
 
