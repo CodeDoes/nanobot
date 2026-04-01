@@ -61,9 +61,9 @@ class ProviderConfig(Base):
 
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
-    kilocode: ProviderConfig = ProviderConfig()
-    featherless: ProviderConfig = ProviderConfig()
-    cerebras: ProviderConfig = ProviderConfig()
+    kilocode: ProviderConfig = Field(default_factory=ProviderConfig)
+    featherless: ProviderConfig = Field(default_factory=ProviderConfig)
+    cerebras: ProviderConfig = Field(default_factory=ProviderConfig)
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
